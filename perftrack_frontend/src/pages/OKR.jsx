@@ -24,16 +24,38 @@ const OKRPage = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState({
     title: '', description: '', owner: user?.id || '', department: '', start_date: '', end_date: '',
   });
 
+  const canManage = user?.role === 'admin' || user?.role === 'manager';
+
   useEffect(() => {
-    api.get('/okr/objectives/').then(r => {
-      setObjectives(r.data.results || r.data || []);
+    const load = async () => {
+      try {
+        const r = await api.get('/okr/objectives/');
+        setObjectives(r.data.results || r.data || []);
+      } catch (e) {
+        console.error('Failed to load OKRs:', e);
+      }
+      // Load employees for assignment dropdown
+      if (canManage) {
+        try {
+          const empRes = await api.get('/employees/dropdown/');
+          setEmployees(Array.isArray(empRes.data) ? empRes.data : empRes.data.results || []);
+        } catch {
+          // fallback - try team endpoint
+          try {
+            const teamRes = await api.get('/team/');
+            setEmployees(Array.isArray(teamRes.data) ? teamRes.data : teamRes.data.results || []);
+          } catch { /* ignore */ }
+        }
+      }
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+    };
+    load();
+  }, [canManage]);
 
   const handleCreate = async () => {
     if (!form.title || !form.start_date || !form.end_date) return;
@@ -55,7 +77,28 @@ const OKRPage = ({ user }) => {
 
   const filtered = filter === 'all' ? objectives : objectives.filter(o => getStatus(o) === filter);
 
-  if (loading) return <div style={{ padding: 40, color: 'var(--text3)', textAlign: 'center' }}>Loading OKRs…</div>;
+  // Loading skeleton
+  if (loading) return (
+    <div style={{ padding: 40 }}>
+      <div className="metrics-grid" style={{ marginBottom: 24 }}>
+        {[1,2,3,4].map(i => (
+          <div key={i} className="metric-card" style={{ minHeight: 90 }}>
+            <div style={{ width: 100, height: 12, background: 'var(--bg4)', borderRadius: 4, marginBottom: 8 }} />
+            <div style={{ width: 60, height: 28, background: 'var(--bg4)', borderRadius: 6 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 16 }}>
+        {[1,2,3].map(i => (
+          <div key={i} className="card" style={{ minHeight: 180 }}>
+            <div style={{ width: '70%', height: 14, background: 'var(--bg4)', borderRadius: 4, marginBottom: 12 }} />
+            <div style={{ width: '40%', height: 10, background: 'var(--bg4)', borderRadius: 4, marginBottom: 20 }} />
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--bg4)' }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   const completed = objectives.filter(o => o.progress >= 100).length;
   const avgProgress = objectives.length > 0 ? Math.round(objectives.reduce((a, o) => a + (o.progress || 0), 0) / objectives.length) : 0;
@@ -89,7 +132,7 @@ const OKRPage = ({ user }) => {
             </button>
           ))}
         </div>
-        {(user.role === 'admin' || user.role === 'manager') && (
+        {canManage && (
           <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>+ Add Objective</button>
         )}
       </div>
@@ -100,6 +143,8 @@ const OKRPage = ({ user }) => {
           const st = getStatus(obj);
           const cfg = statusCfg[st];
           const krs = obj.key_results || [];
+          // Get owner name from owner_detail (nested serializer) or fallback
+          const ownerName = obj.owner_detail?.full_name || obj.owner_name || '—';
           return (
             <div key={obj.id} className="card" style={{ display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
@@ -120,7 +165,7 @@ const OKRPage = ({ user }) => {
                   <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-head)' }}>{Math.round(obj.progress)}%</span>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Owner: {obj.owner_name || obj.owner?.full_name || '—'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Owner: {ownerName}</div>
                   <div style={{ fontSize: 12, color: 'var(--text3)' }}>
                     {obj.start_date} → {obj.end_date}
                   </div>
@@ -146,7 +191,7 @@ const OKRPage = ({ user }) => {
                 </div>
               )}
 
-              {(user.role === 'admin' || user.role === 'manager') && (
+              {canManage && (
                 <div style={{ marginTop: 'auto', paddingTop: 12, display: 'flex', gap: 8 }}>
                   <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => handleDelete(obj.id)}>Delete</button>
                 </div>
@@ -157,7 +202,15 @@ const OKRPage = ({ user }) => {
       </div>
 
       {filtered.length === 0 && (
-        <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text3)' }}>No objectives found</div>
+        <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🎯</div>
+          <div style={{ color: 'var(--text2)', fontSize: 15, fontWeight: 500, marginBottom: 6 }}>
+            {filter === 'all' ? 'No objectives yet' : `No ${statusCfg[filter]?.label || filter} objectives`}
+          </div>
+          <div style={{ color: 'var(--text3)', fontSize: 13 }}>
+            {canManage ? 'Click "+ Add Objective" to create your first OKR.' : 'Objectives assigned to you will appear here.'}
+          </div>
+        </div>
       )}
 
       {/* Create Modal */}
@@ -166,20 +219,31 @@ const OKRPage = ({ user }) => {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-title">Create Objective</div>
             <div className="input-group">
-              <label className="input-label">Title</label>
+              <label className="input-label">Title *</label>
               <input className="input-field" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Q3 Revenue Growth" />
             </div>
             <div className="input-group">
               <label className="input-label">Description</label>
               <textarea className="input-field" rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Describe the objective…" style={{ resize: 'vertical' }} />
             </div>
+            {canManage && employees.length > 0 && (
+              <div className="input-group">
+                <label className="input-label">Assign To</label>
+                <select className="input-field" value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })} style={{ width: '100%' }}>
+                  <option value={user.id}>Myself ({user.full_name})</option>
+                  {employees.filter(e => e.id !== user.id).map(e => (
+                    <option key={e.id} value={e.id}>{e.full_name}{e.department ? ` — ${e.department}` : (e.department_name ? ` — ${e.department_name}` : '')}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="form-row">
               <div className="form-col">
-                <label className="input-label">Start Date</label>
+                <label className="input-label">Start Date *</label>
                 <input className="input-field" type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
               </div>
               <div className="form-col">
-                <label className="input-label">End Date</label>
+                <label className="input-label">End Date *</label>
                 <input className="input-field" type="date" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
               </div>
             </div>

@@ -404,10 +404,36 @@ const Login = ({ onLogin }) => {
   ];
 
   const credentials = {
-    admin:    { email: 'admin@acme.com',   password: 'Admin@123' },
-    manager:  { email: 'marcus@acme.com',  password: 'Manager@123' },
-    employee: { email: 'jordan@acme.com',  password: 'Employee@123' },
-  };
+  admin: {
+    email: 'admin@acme.com',
+    password: 'Admin@123'
+  },
+
+  manager: {
+    email: 'marcus@acme.com',
+    password: 'Manager@123'
+  },
+
+  alex: {
+    email: 'alex.rivera@acme.com',
+    password: 'Employee@123'
+  },
+
+  jordan: {
+    email: 'jordan.lee@acme.com',
+    password: 'Employee@123'
+  },
+
+  maya: {
+    email: 'maya.patel@acme.com',
+    password: 'Employee@123'
+  },
+
+  tom: {
+    email: 'tom.nguyen@acme.com',
+    password: 'Employee@123'
+  }
+};
 
   useEffect(() => {
     const c = credentials[role];
@@ -510,7 +536,7 @@ const AdminDashboard = ({ user }) => {
         </div>
         <div className="metric-card amber">
           <div className="metric-label">Evaluations</div>
-          <div className="metric-value amber">{s.total_evaluations||0}</div>
+          <div className="metric-value amber">{s.total_evaluations||companyData?.total_evaluations||0}</div>
           <div className="metric-delta" style={{color:'var(--text3)'}}>Total records</div>
         </div>
         <div className="metric-card green">
@@ -736,7 +762,7 @@ const EvaluatePage = ({ user }) => {
     if (!form.employee || !form.period) return;
     setSubmitting(true);
     try {
-      const res = await api.post('/performance/', { employee: Number(form.employee), period: Number(form.period), task_completion: form.task_completion, productivity_score: form.productivity, attendance_percentage: form.attendance, manager_rating: form.rating });
+      const res = await api.post('/performance/create/', { employee: Number(form.employee), period: Number(form.period), task_completion: form.task_completion, productivity: form.productivity, attendance: form.attendance, rating: form.rating });
       setResult(res.data);
     } catch(e) { console.error(e); }
     setSubmitting(false);

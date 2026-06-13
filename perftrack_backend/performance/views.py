@@ -112,9 +112,13 @@ class EmployeeStatsView(APIView):
             return Response({'error': 'Forbidden'}, status=403)
         if user.role == 'manager' and employee.manager_id != user.id:
             return Response({'error': 'Forbidden'}, status=403)
-        records = PerformanceRecord.objects.filter(employee=employee).order_by('period__start_date')
+        records = PerformanceRecord.objects.filter(employee=employee).select_related('period').order_by('period__start_date')
         if not records.exists():
-            return Response({'employee_id': employee_id, 'records': [], 'averages': {}})
+            return Response({
+                'employee_id': employee_id, 'records': [], 'averages': {},
+                'avg_task': 0, 'avg_prod': 0, 'avg_attend': 0, 'avg_rating': 0,
+                'latest_prediction': None, 'total_periods': 0, 'history': [],
+            })
         averages = records.aggregate(
             avg_task=Avg('task_completion'),
             avg_prod=Avg('productivity'),
@@ -123,6 +127,32 @@ class EmployeeStatsView(APIView):
         )
         serialized = PerformanceRecordSerializer(records, many=True).data
         latest = records.last()
+
+        # Build history array for frontend charts
+        history = []
+        for r in records:
+            history.append({
+                'period_name': r.period.name if r.period else '',
+                'period': r.period.name if r.period else '',
+                'task_completion': r.task_completion,
+                'productivity_score': r.productivity,
+                'attendance_percentage': r.attendance,
+                'manager_rating': r.rating,
+                'predicted_score': r.predicted_score,
+                'composite_score': r.composite_score,
+            })
+
+        # Current record (latest) for the dashboard cards
+        current = None
+        if latest:
+            current = {
+                'task_completion': latest.task_completion,
+                'productivity_score': latest.productivity,
+                'attendance_percentage': latest.attendance,
+                'manager_rating': latest.rating,
+            }
+
+        avg_clean = {k: round(v, 2) if v else 0 for k, v in averages.items()}
         return Response({
             'employee': {
                 'id': employee.id,
@@ -132,9 +162,16 @@ class EmployeeStatsView(APIView):
                 'department': employee.department.name if employee.department else None,
             },
             'records': serialized,
-            'averages': {k: round(v, 2) if v else 0 for k, v in averages.items()},
-            'latest_prediction': latest.predicted_score,
+            'averages': avg_clean,
+            'current': current,
+            'history': history,
+            'latest_prediction': latest.predicted_score if latest else None,
             'total_periods': records.count(),
+            # Flatten averages to root for frontend compatibility
+            'avg_task': avg_clean.get('avg_task', 0),
+            'avg_prod': avg_clean.get('avg_prod', 0),
+            'avg_attend': avg_clean.get('avg_attend', 0),
+            'avg_rating': avg_clean.get('avg_rating', 0),
         })
 
 
@@ -146,6 +183,7 @@ class DashboardSummaryView(APIView):
         if user.role == 'admin':
             total_employees = User.objects.filter(role='employee', is_active=True).count()
             total_managers = User.objects.filter(role='manager', is_active=True).count()
+            total_evaluations = PerformanceRecord.objects.count()
             agg = PerformanceRecord.objects.aggregate(
                 avg_task=Avg('task_completion'),
                 avg_prod=Avg('productivity'),
@@ -156,6 +194,7 @@ class DashboardSummaryView(APIView):
                 'role': 'admin',
                 'total_employees': total_employees,
                 'total_managers': total_managers,
+                'total_evaluations': total_evaluations,
                 'company_averages': {k: round(v, 2) if v else 0 for k, v in agg.items()},
             })
         elif user.role == 'manager':

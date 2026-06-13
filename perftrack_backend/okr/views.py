@@ -2,6 +2,9 @@ from rest_framework import generics, status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from django.db.models import Avg
+from django.utils import timezone
+import logging
 
 from .models import Objective, KeyResult
 from .serializers import (
@@ -9,6 +12,8 @@ from .serializers import (
 )
 from accounts.permissions import IsAdmin, IsAdminOrManager
 from accounts.models import User
+
+logger = logging.getLogger(__name__)
 
 
 class ObjectiveListCreateView(generics.ListCreateAPIView):
@@ -43,8 +48,8 @@ class ObjectiveListCreateView(generics.ListCreateAPIView):
                     title='New OKR Assigned',
                     message=f'You have been assigned a new objective: "{obj.title}".',
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f'Failed to create OKR notification: {e}')
 
 
 class ObjectiveDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -84,6 +89,69 @@ class ObjectiveProgressView(APIView):
                 }
                 for kr in krs
             ],
+        })
+
+
+class OKRSummaryView(APIView):
+    """Dashboard summary for OKR metrics — real-time calculated."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        qs = Objective.objects.select_related('owner').prefetch_related('key_results')
+        if user.role == 'admin':
+            qs = qs.all()
+        elif user.role == 'manager':
+            team_ids = list(
+                User.objects.filter(manager=user).values_list('id', flat=True)
+            )
+            qs = qs.filter(owner_id__in=team_ids + [user.id])
+        else:
+            qs = qs.filter(owner=user)
+
+        objectives = list(qs)
+        total = len(objectives)
+        if total == 0:
+            return Response({
+                'total_objectives': 0,
+                'avg_progress': 0,
+                'completed': 0,
+                'at_risk': 0,
+                'on_track': 0,
+                'delayed': 0,
+            })
+
+        completed = sum(1 for o in objectives if o.progress >= 100)
+        now = timezone.now().date()
+
+        at_risk = 0
+        delayed = 0
+        on_track = 0
+        progress_sum = 0
+
+        for o in objectives:
+            progress_sum += o.progress or 0
+            if o.progress >= 100:
+                continue
+            total_days = (o.end_date - o.start_date).days or 1
+            elapsed_days = (now - o.start_date).days
+            elapsed_ratio = max(0, min(1, elapsed_days / total_days))
+            progress_ratio = (o.progress or 0) / 100
+
+            if progress_ratio >= elapsed_ratio * 0.7:
+                on_track += 1
+            elif progress_ratio >= elapsed_ratio * 0.4:
+                at_risk += 1
+            else:
+                delayed += 1
+
+        return Response({
+            'total_objectives': total,
+            'avg_progress': round(progress_sum / total, 1) if total > 0 else 0,
+            'completed': completed,
+            'at_risk': at_risk + delayed,
+            'on_track': on_track,
+            'delayed': delayed,
         })
 
 
